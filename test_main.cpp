@@ -11,14 +11,10 @@
 int main()
 {
 
-	Path_Key key(8888);
+	Path_Key key(9807);
 	std::vector<Path_Value> in_value_vec;
 	Path_Value tmp2("127.0.0.1",9999,5);
-	Path_Value tmp3("127.0.0.1",9999,4);
-	Path_Value tmp5("127.0.0.1",9999,1);
 	in_value_vec.push_back(tmp2);
-	in_value_vec.push_back(tmp3);
-	in_value_vec.push_back(tmp5);
 	
 	Path_Manager path_m;
 	
@@ -66,6 +62,9 @@ int main()
 #ifdef TEST_3
 
 #include "io_dispatch.h"
+#include "easy_log.h"
+
+easy_log g_log("./log/comio.log",(1000000),8);
 
 int main()
 {

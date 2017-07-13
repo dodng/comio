@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/time.h>
 
 class AutoLock_Mutex
 {
@@ -37,5 +38,14 @@ int get_sock_status(int fd,int option);
 int get_sock_tcp_status(int fd);
 int InitListenSocket(char *ip, short port);
 
+inline int my_time_diff(struct timeval &start,struct timeval &end)
+{
+        if (start.tv_usec <= end.tv_usec)
+        {
+                return (end.tv_usec-start.tv_usec);
+        }
+        else
+                return (1000000 - start.tv_usec + end.tv_usec);
+}
 
 #endif

@@ -28,9 +28,20 @@ struct io_dispatch_thread_info
 
 struct io_dispatch_info
 {
+	io_dispatch_info(int upstream_buff_size,int downstream_buff_size)
+	{
+		p_upstream = new Io_Storage(upstream_buff_size);
+		p_downstream = new Io_Storage(downstream_buff_size);
+	}
+	~io_dispatch_info()
+	{
+		if (p_upstream) {delete p_upstream;}
+		if (p_downstream) {delete p_downstream;}
+	}
 	Io_Storage * p_upstream;
 	Io_Storage * p_downstream;
 	io_dispatch_thread_info * p_thread_info;
+	struct timeval l_time[8];//clock time
 };
 
 typedef void (* event_cb_func)(int fd, short int events, void *arg);

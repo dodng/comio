@@ -2,9 +2,17 @@
 
 short g_search_port = 8807;
 char g_search_ip[64] = "0.0.0.0";
-int g_recv_buff = (1024 * 4);
-struct timeval tv_recv_timeout = {0,100000};
+int g_recv_buff = (16384);
+struct timeval tv_recv_timeout = {0,900000};
 
+//log
+#if 1
+#include "easy_log.h"
+#include <errno.h>
+
+extern easy_log g_log;
+#define BUFF_SIZE (1024 * 4)
+#endif
 
 void inline reg_add_event(struct event *p_eve,int fd,int event_type,event_cb_func p_func,void *p_arg,
 		struct event_base *p_base,struct timeval *p_time)
@@ -22,24 +30,54 @@ void inline reg_add_event(struct event *p_eve,int fd,int event_type,event_cb_fun
 
 struct io_dispatch_info * it_pool_get()
 {
-	io_dispatch_info * p_tmp = new io_dispatch_info();
-	Io_Storage * p_stream_1 = new Io_Storage(g_recv_buff);
-	Io_Storage * p_stream_2 = new Io_Storage(g_recv_buff);
-	if (p_tmp)
-	{
-		p_tmp->p_upstream = p_stream_1;
-		p_tmp->p_downstream = p_stream_2;
-	}
+	char log_buff[1024] = {0};
+	io_dispatch_info * p_tmp = new io_dispatch_info(g_recv_buff, g_recv_buff);
+	gettimeofday(&p_tmp->l_time[0], 0);
+	gettimeofday(&p_tmp->l_time[1], 0);
+	snprintf(log_buff,sizeof(log_buff),"[%p] it_pool_get time(%d)"
+			,p_tmp,my_time_diff(p_tmp->l_time[0], p_tmp->l_time[1]));
+	g_log.write_record(log_buff);
+	/*
+	   Io_Storage * p_stream_1 = new Io_Storage(g_recv_buff);
+	   Io_Storage * p_stream_2 = new Io_Storage(g_recv_buff);
+
+	   if (p_tmp && p_stream_1 && p_stream_2)
+	   {
+	   p_tmp->p_upstream = p_stream_1;
+	   p_tmp->p_downstream = p_stream_2;
+	   gettimeofday(&p_tmp->l_time[1], 0);
+	   snprintf(log_buff,sizeof(log_buff),"[%p] it_pool_get time(%d)"
+	   ,p_tmp,my_time_diff(p_tmp->l_time[0], p_tmp->l_time[1]));
+	   g_log.write_record(log_buff);
+	   }
+	   else
+	   {
+	   p_tmp = 0;
+	   }*/
 
 	return p_tmp;
 }
 
 void it_pool_put(struct io_dispatch_info *p_it)
 {
+	char log_buff[1024] = {0};
+	snprintf(log_buff,sizeof(log_buff),"[%p] it_pool_put", p_it);
+	g_log.write_record(log_buff);
 	if (p_it) 
 	{
-		if (p_it->p_upstream) {delete p_it->p_upstream;}
-		if (p_it->p_downstream) {delete p_it->p_downstream;}
+		/*
+		   if (p_it->p_upstream) 
+		   {
+		   delete p_it->p_upstream;
+		   p_it->p_upstream = 0;
+		   }
+
+		   if (p_it->p_downstream) 
+		   {
+		   delete p_it->p_downstream;
+		   p_it->p_downstream = 0;
+		   }
+		   */
 		delete p_it;
 	}
 }
@@ -52,10 +90,13 @@ void ProcessDownStream_Recv(int fd, short int events, void *arg)
 	struct event *p_ev = &(p_it->p_downstream->_ev);
 	struct event_base *base = p_it->p_thread_info->p_event_base;
 	int len;
+	char log_buff[BUFF_SIZE] = {0};
 
 	//timeout
 	if (events == EV_TIMEOUT)
 	{
+		snprintf(log_buff,sizeof(log_buff),"[%p] ProcessDownStream_Recv\tfd[%d]\ttimeout", p_it, fd);
+		g_log.write_record(log_buff);
 		event_del(p_ev);
 		goto GC;	
 	} 
@@ -66,18 +107,32 @@ void ProcessDownStream_Recv(int fd, short int events, void *arg)
 
 	if(len > 0)
 	{
+		gettimeofday(&p_it->l_time[4], 0);
+		snprintf(log_buff,sizeof(log_buff),"[%p] ProcessDownStream_Recv\tfd[%d]\trecv[%d]\ttime(%d)", p_it, fd, len,
+				my_time_diff(p_it->l_time[3], p_it->l_time[4]));
+		g_log.write_record(log_buff);
+
 		int send_len = -1;
 
 		//senddata to downstream
 		send_len = p_it->p_downstream->send_2_peer(p_it->p_upstream->io_sd);
+		gettimeofday(&p_it->l_time[5], 0);
+		snprintf(log_buff,sizeof(log_buff),"[%p] ProcessDownStream_Recv\tfd[%d]\tsend[%d]\ttime(%d)\tsum_time(%d)", p_it, fd, send_len,
+				my_time_diff(p_it->l_time[4], p_it->l_time[5]),
+				my_time_diff(p_it->l_time[0], p_it->l_time[5]));
+		g_log.write_record(log_buff);
 
 		//add recv event for upstream
 		reg_add_event(&(p_it->p_upstream->_ev),p_it->p_upstream->io_sd,EV_READ,ProcessUpStream_Recv,p_it,base,&tv_recv_timeout);
+		//	g_log.write_record("reg_add_event\tProcessUpStream_Recv");
 
 
 	}
 	else
 	{
+		snprintf(log_buff,sizeof(log_buff),"[%p] ProcessDownStream_Recv\tfd[%d]\trecv[%d]\terrno[%d]", p_it, fd, len, errno);
+		g_log.write_record(log_buff);
+
 		if (len == 0)
 		{
 		}
@@ -103,10 +158,14 @@ void ProcessUpStream_Recv(int fd, short int events, void *arg)
 	struct event *p_ev = &(p_it->p_upstream->_ev);
 	struct event_base *base = p_it->p_thread_info->p_event_base;
 	int len;
+	char log_buff[BUFF_SIZE] = {0};
 
 	//timeout
 	if (events == EV_TIMEOUT)
 	{
+		snprintf(log_buff,sizeof(log_buff),"[%p] ProcessUpStream_Recv\tfd[%d]\ttimeout", p_it, fd);
+		g_log.write_record(log_buff);
+
 		event_del(p_ev);
 		goto GC;	
 	} 
@@ -117,6 +176,12 @@ void ProcessUpStream_Recv(int fd, short int events, void *arg)
 
 	if(len > 0)
 	{
+		gettimeofday(&p_it->l_time[2], 0);
+		snprintf(log_buff,sizeof(log_buff),"[%p] ProcessUpStream_Recv\tfd[%d]\trecv[%d]\ttime(%d)", p_it, fd, len,
+				my_time_diff(p_it->l_time[1], p_it->l_time[2]));
+
+		g_log.write_record(log_buff);
+
 		Path_Value path_res;
 		int downstream_sd = 0;
 		int send_len = -1;
@@ -132,14 +197,24 @@ void ProcessUpStream_Recv(int fd, short int events, void *arg)
 		{
 			p_it->p_downstream->set_io_sd(downstream_sd);
 			send_len = p_it->p_upstream->send_2_peer(downstream_sd);
+			gettimeofday(&p_it->l_time[3], 0);
+			snprintf(log_buff,sizeof(log_buff),"[%p] ProcessUpStream_Recv\tfd[%d]\tsend[%d]\ttime(%d)", p_it, fd, send_len,
+					my_time_diff(p_it->l_time[2], p_it->l_time[3]));
+
+			g_log.write_record(log_buff);
 		}
 		//add recv event for downstream
 		reg_add_event(&(p_it->p_downstream->_ev),p_it->p_downstream->io_sd,EV_READ,ProcessDownStream_Recv,p_it,base,&tv_recv_timeout);
+		//	g_log.write_record("reg_add_event\tProcessDownStream_Recv");
 
 
 	}
 	else
 	{
+		gettimeofday(&p_it->l_time[6], 0);
+		snprintf(log_buff,sizeof(log_buff),"[%p] ProcessUpStream_Recv\tfd[%d]\trecv[%d]\terrno[%d]\ttime(%d)", p_it, fd, len, errno,
+				my_time_diff(p_it->l_time[5], p_it->l_time[6]));
+		g_log.write_record(log_buff);
 		if (len == 0)
 		{
 		}
@@ -179,11 +254,15 @@ void ProcessListenEvent(int fd, short what, void *arg)
 		}  
 
 		struct io_dispatch_info *p_read_it = it_pool_get();
+
 		p_read_it->p_thread_info = p_thread_info;
 		// add a read event for receive data
 		p_read_it->p_upstream->set_io_sd(accept_fd);
 
-		reg_add_event(&(p_read_it->p_upstream->_ev),p_read_it->p_upstream->io_sd,EV_READ,ProcessUpStream_Recv,p_read_it,p_thread_info->p_event_base,&tv_recv_timeout);
+		reg_add_event(&(p_read_it->p_upstream->_ev),p_read_it->p_upstream->io_sd,
+				EV_READ,ProcessUpStream_Recv,p_read_it,
+				p_thread_info->p_event_base,&tv_recv_timeout);
+		//g_log.write_record("reg_add_event\tProcessUpStream_Recv");
 
 
 	}
@@ -203,6 +282,7 @@ static void *IoLoopThread(void *arg)
 
 
 	reg_add_event(&notify_event,p_thread_info->path_k_sd,EV_READ | EV_PERSIST, ProcessListenEvent, p_thread_info,base,NULL);
+	//g_log.write_record("reg_add_event\tProcessListenEvent");
 	event_base_dispatch(base);
 	pthread_exit(NULL);
 }
@@ -211,12 +291,10 @@ static void *IoLoopThread(void *arg)
 int io_dispatch_main()
 {
 	//get path_key and Path_Manager
-	Path_Key key(8888);
+	Path_Key key(9807);
 	std::vector<Path_Value> in_value_vec;
-	Path_Value tmp2("127.0.0.1",9995,5);
-	Path_Value tmp5("127.0.0.1",9991,1);
+	Path_Value tmp2("127.0.0.1",8817,5);
 	in_value_vec.push_back(tmp2);
-	in_value_vec.push_back(tmp5);
 
 	Path_Manager path_m;
 

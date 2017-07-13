@@ -48,7 +48,11 @@ int Io_Storage::process_recv_event(int recv_sd)
 
 	int ret = -3;
 	ret = recv(recv_sd,buff, buff_len, 0);
-	_now_recv_len += ret;
+	if (ret > 0)
+	{
+		_now_recv_len += ret;
+	}
+
 	return ret;
 }
 
