@@ -4,6 +4,7 @@ short g_search_port = 8807;
 char g_search_ip[64] = "0.0.0.0";
 int g_recv_buff = (16384);
 struct timeval tv_recv_timeout = {0,900000};
+struct timeval tv_timer = {0,500000};
 
 //log
 #if 1
@@ -37,23 +38,6 @@ struct io_dispatch_info * it_pool_get()
 	snprintf(log_buff,sizeof(log_buff),"[%p] it_pool_get time(%d)"
 			,p_tmp,my_time_diff(p_tmp->l_time[0], p_tmp->l_time[1]));
 	g_log.write_record(log_buff);
-	/*
-	   Io_Storage * p_stream_1 = new Io_Storage(g_recv_buff);
-	   Io_Storage * p_stream_2 = new Io_Storage(g_recv_buff);
-
-	   if (p_tmp && p_stream_1 && p_stream_2)
-	   {
-	   p_tmp->p_upstream = p_stream_1;
-	   p_tmp->p_downstream = p_stream_2;
-	   gettimeofday(&p_tmp->l_time[1], 0);
-	   snprintf(log_buff,sizeof(log_buff),"[%p] it_pool_get time(%d)"
-	   ,p_tmp,my_time_diff(p_tmp->l_time[0], p_tmp->l_time[1]));
-	   g_log.write_record(log_buff);
-	   }
-	   else
-	   {
-	   p_tmp = 0;
-	   }*/
 
 	return p_tmp;
 }
@@ -65,21 +49,47 @@ void it_pool_put(struct io_dispatch_info *p_it)
 	g_log.write_record(log_buff);
 	if (p_it) 
 	{
-		/*
-		   if (p_it->p_upstream) 
-		   {
-		   delete p_it->p_upstream;
-		   p_it->p_upstream = 0;
-		   }
-
-		   if (p_it->p_downstream) 
-		   {
-		   delete p_it->p_downstream;
-		   p_it->p_downstream = 0;
-		   }
-		   */
 		delete p_it;
 	}
+}
+
+void ProcessTimer(int fd, short int events, void *arg)
+{
+	if ( 0 == arg)
+		return;
+	struct io_dispatch_thread_info *p_it = (struct io_dispatch_thread_info *)arg;
+	struct event *p_ev = &(p_it->timer_ev);
+	struct event_base *base = p_it->p_event_base;
+	event_del(p_ev);
+
+	if ( p_it->thread_status == thread_closing)
+	{
+		struct timeval closing_wait_time = {0,0};
+		my_time_add(tv_recv_timeout,closing_wait_time);
+		my_time_add(tv_recv_timeout,closing_wait_time);
+		p_it->timer_tv = closing_wait_time;
+
+		reg_add_event(p_ev,-1,0,ProcessTimer,p_it,base,&(p_it->timer_tv));
+		p_it->thread_status = thread_close;
+
+		g_log.write_record("ProcessTimer [closing] reg_add");
+	}
+	else if (p_it->thread_status == thread_close)
+	{
+		event_base_free(base);
+		if (p_it) 
+		{
+			delete p_it;
+			p_it = 0;
+		}
+		g_log.write_record("event_base_free");
+	}
+	else
+	{
+		reg_add_event(p_ev,-1,0,ProcessTimer,p_it,base,&(p_it->timer_tv));
+		g_log.write_record("ProcessTimer reg_add");
+	}
+
 }
 
 void ProcessDownStream_Recv(int fd, short int events, void *arg)
@@ -182,16 +192,15 @@ void ProcessUpStream_Recv(int fd, short int events, void *arg)
 
 		g_log.write_record(log_buff);
 
-		Path_Value path_res;
 		int downstream_sd = 0;
 		int send_len = -1;
 		//select which downstream path
 		if (p_it->p_thread_info && p_it->p_thread_info->p_path_mgr)
 		{
-			p_it->p_thread_info->p_path_mgr->Select_Path(p_it->p_thread_info->path_k,path_res);
+			p_it->p_thread_info->p_path_mgr->Select_Path(p_it->p_thread_info->path_k,p_it->path_res);
 		}
 		//get io_sd from downstreampath
-		downstream_sd = p_it->p_thread_info->io_mgr.get_io(path_res._ip,(int)path_res._port);
+		downstream_sd = p_it->p_thread_info->io_mgr.get_io(p_it->path_res._ip,(int)p_it->path_res._port);
 		//senddata to downstream
 		if (downstream_sd > 0)
 		{
@@ -245,6 +254,13 @@ void ProcessListenEvent(int fd, short what, void *arg)
 	accept_fd = accept(fd, (struct sockaddr*)&sin, &len);
 	pthread_mutex_unlock(p_thread_info->p_path_k_lock);
 
+	//if thread is closing
+	if (p_thread_info->thread_status != thread_use)
+	{
+		g_log.write_record("return\tProcessListenEvent");
+		return;
+	}
+
 	if (accept_fd > 0)
 	{
 		int iret = 0;
@@ -282,9 +298,10 @@ static void *IoLoopThread(void *arg)
 
 
 	reg_add_event(&notify_event,p_thread_info->path_k_sd,EV_READ | EV_PERSIST, ProcessListenEvent, p_thread_info,base,NULL);
-	//g_log.write_record("reg_add_event\tProcessListenEvent");
+	reg_add_event(&(p_thread_info->timer_ev),-1,0,ProcessTimer,p_thread_info,base,&(p_thread_info->timer_tv));
 	event_base_dispatch(base);
-	pthread_exit(NULL);
+	g_log.write_record("IoLoopThread exit");
+	pthread_exit(0);
 }
 
 
@@ -293,8 +310,14 @@ int io_dispatch_main()
 	//get path_key and Path_Manager
 	Path_Key key(9807);
 	std::vector<Path_Value> in_value_vec;
-	Path_Value tmp2("127.0.0.1",8817,5);
+	Path_Value tmp1("127.0.0.1",8817,5);
+	Path_Value tmp2("127.0.0.1",8827,5);
+	Path_Value tmp3("127.0.0.1",8837,5);
+	Path_Value tmp4("127.0.0.1",8847,5);
+	in_value_vec.push_back(tmp1);
 	in_value_vec.push_back(tmp2);
+	in_value_vec.push_back(tmp3);
+	in_value_vec.push_back(tmp4);
 
 	Path_Manager path_m;
 
@@ -310,8 +333,9 @@ int io_dispatch_main()
 
 	//set values
 	io_thread_p->p_path_mgr = &path_m;
-	io_thread_p->thread_status = 0;
+	io_thread_p->thread_status = thread_use;
 	io_thread_p->path_k = key;
+	io_thread_p->timer_tv = tv_timer;
 
 	if (io_thread_p->p_path_mgr) 
 	{
@@ -326,7 +350,10 @@ int io_dispatch_main()
 	{
 	}
 
-	pthread_join(io_thread_p->thread_info,0);
-
+	sleep(23);
+	io_thread_p->thread_status = thread_closing;
+	//pthread_join(io_thread_p->thread_info,0);
+	
+	sleep(3); //dodng:will delete
 
 }

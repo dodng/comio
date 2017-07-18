@@ -48,4 +48,19 @@ inline int my_time_diff(struct timeval &start,struct timeval &end)
                 return (1000000 - start.tv_usec + end.tv_usec);
 }
 
+inline void my_time_add(struct timeval & add,struct timeval &n)
+{
+	if (n.tv_usec + add.tv_usec >= 1000000)
+	{
+		n.tv_sec += add.tv_sec;
+		n.tv_sec += 1;
+		n.tv_usec = (n.tv_usec + add.tv_usec) - 1000000;
+	}
+	else
+	{
+		n.tv_sec += add.tv_sec;
+		n.tv_usec += add.tv_usec;
+	}
+}
+
 #endif

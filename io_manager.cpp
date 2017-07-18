@@ -105,7 +105,6 @@ int Io_Manager::init_connet_fd(std::string ip,int port)
 	return sd;
 }
 
-#if 0
 int Io_Manager::close_io(std::string ip,int port)
 {
 	int ret = -1;
@@ -124,4 +123,3 @@ int Io_Manager::close_io(std::string ip,int port)
 	return ret;
 
 }
-#endif

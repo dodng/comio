@@ -81,7 +81,7 @@ class Io_Manager
 			pthread_mutex_destroy(&_io_dict_lock);
 		}
 		int get_io(std::string ip,int port); //return can use sd,ok:>0,else:error
-//		int close_io(std::string ip,int port); //ok:0,else:error
+		int close_io(std::string ip,int port); //ok:0,else:error
 
 	private:
 		int init_connet_fd(std::string ip,int port); //return can use sd,ok:>0,else:error
