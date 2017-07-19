@@ -2,8 +2,8 @@
 
 short g_search_port = 8807;
 char g_search_ip[64] = "0.0.0.0";
-int g_recv_buff = (16384);
-struct timeval tv_recv_timeout = {0,900000};
+int g_recv_buff_io = (16384);
+struct timeval tv_recv_timeout_io = {0,900000};
 struct timeval tv_timer = {0,500000};
 
 //log
@@ -29,23 +29,23 @@ void inline reg_add_event(struct event *p_eve,int fd,int event_type,event_cb_fun
 }
 
 
-struct io_dispatch_info * it_pool_get()
+struct io_dispatch_info * get_io_dispatch_info()
 {
 	char log_buff[1024] = {0};
-	io_dispatch_info * p_tmp = new io_dispatch_info(g_recv_buff, g_recv_buff);
+	io_dispatch_info * p_tmp = new io_dispatch_info(g_recv_buff_io, g_recv_buff_io);
 	gettimeofday(&p_tmp->l_time[0], 0);
 	gettimeofday(&p_tmp->l_time[1], 0);
-	snprintf(log_buff,sizeof(log_buff),"[%p] it_pool_get time(%d)"
+	snprintf(log_buff,sizeof(log_buff),"[%p] get_io_dispatch_info time(%d)"
 			,p_tmp,my_time_diff(p_tmp->l_time[0], p_tmp->l_time[1]));
 	g_log.write_record(log_buff);
 
 	return p_tmp;
 }
 
-void it_pool_put(struct io_dispatch_info *p_it)
+void put_io_dispatch_info(struct io_dispatch_info *p_it)
 {
 	char log_buff[1024] = {0};
-	snprintf(log_buff,sizeof(log_buff),"[%p] it_pool_put", p_it);
+	snprintf(log_buff,sizeof(log_buff),"[%p] put_io_dispatch_info", p_it);
 	g_log.write_record(log_buff);
 	if (p_it) 
 	{
@@ -65,8 +65,8 @@ void ProcessTimer(int fd, short int events, void *arg)
 	if ( p_it->thread_status == thread_closing)
 	{
 		struct timeval closing_wait_time = {0,0};
-		my_time_add(tv_recv_timeout,closing_wait_time);
-		my_time_add(tv_recv_timeout,closing_wait_time);
+		my_time_add(tv_recv_timeout_io,closing_wait_time);
+		my_time_add(tv_recv_timeout_io,closing_wait_time);
 		p_it->timer_tv = closing_wait_time;
 
 		reg_add_event(p_ev,-1,0,ProcessTimer,p_it,base,&(p_it->timer_tv));
@@ -133,7 +133,7 @@ void ProcessDownStream_Recv(int fd, short int events, void *arg)
 		g_log.write_record(log_buff);
 
 		//add recv event for upstream
-		reg_add_event(&(p_it->p_upstream->_ev),p_it->p_upstream->io_sd,EV_READ,ProcessUpStream_Recv,p_it,base,&tv_recv_timeout);
+		reg_add_event(&(p_it->p_upstream->_ev),p_it->p_upstream->io_sd,EV_READ,ProcessUpStream_Recv,p_it,base,&tv_recv_timeout_io);
 		//	g_log.write_record("reg_add_event\tProcessUpStream_Recv");
 
 
@@ -155,7 +155,7 @@ void ProcessDownStream_Recv(int fd, short int events, void *arg)
 
 GC:
 	close(p_it->p_upstream->io_sd);
-	it_pool_put(p_it);
+	put_io_dispatch_info(p_it);
 	return;
 
 }
@@ -213,7 +213,7 @@ void ProcessUpStream_Recv(int fd, short int events, void *arg)
 			g_log.write_record(log_buff);
 		}
 		//add recv event for downstream
-		reg_add_event(&(p_it->p_downstream->_ev),p_it->p_downstream->io_sd,EV_READ,ProcessDownStream_Recv,p_it,base,&tv_recv_timeout);
+		reg_add_event(&(p_it->p_downstream->_ev),p_it->p_downstream->io_sd,EV_READ,ProcessDownStream_Recv,p_it,base,&tv_recv_timeout_io);
 		//	g_log.write_record("reg_add_event\tProcessDownStream_Recv");
 
 
@@ -236,7 +236,7 @@ void ProcessUpStream_Recv(int fd, short int events, void *arg)
 
 GC:
 	close(p_ev->ev_fd);
-	it_pool_put(p_it);
+	put_io_dispatch_info(p_it);
 	return;
 
 }
@@ -269,7 +269,7 @@ void ProcessListenEvent(int fd, short what, void *arg)
 			return;
 		}  
 
-		struct io_dispatch_info *p_read_it = it_pool_get();
+		struct io_dispatch_info *p_read_it = get_io_dispatch_info();
 
 		p_read_it->p_thread_info = p_thread_info;
 		// add a read event for receive data
@@ -277,7 +277,7 @@ void ProcessListenEvent(int fd, short what, void *arg)
 
 		reg_add_event(&(p_read_it->p_upstream->_ev),p_read_it->p_upstream->io_sd,
 				EV_READ,ProcessUpStream_Recv,p_read_it,
-				p_thread_info->p_event_base,&tv_recv_timeout);
+				p_thread_info->p_event_base,&tv_recv_timeout_io);
 		//g_log.write_record("reg_add_event\tProcessUpStream_Recv");
 
 
@@ -304,25 +304,10 @@ static void *IoLoopThread(void *arg)
 	pthread_exit(0);
 }
 
+//ret 0:ok,else failed
 
-int io_dispatch_main()
+int io_launch_one_thread(Path_Key & in_key, Path_Manager & in_path_mgr)
 {
-	//get path_key and Path_Manager
-	Path_Key key(9807);
-	std::vector<Path_Value> in_value_vec;
-	Path_Value tmp1("127.0.0.1",8817,5);
-	Path_Value tmp2("127.0.0.1",8827,5);
-	Path_Value tmp3("127.0.0.1",8837,5);
-	Path_Value tmp4("127.0.0.1",8847,5);
-	in_value_vec.push_back(tmp1);
-	in_value_vec.push_back(tmp2);
-	in_value_vec.push_back(tmp3);
-	in_value_vec.push_back(tmp4);
-
-	Path_Manager path_m;
-
-	path_m.Update_Path(key,in_value_vec);
-
 	//get io_dispatch_thread_info
 	struct io_dispatch_thread_info * io_thread_p = new io_dispatch_thread_info();
 	//init values
@@ -332,9 +317,9 @@ int io_dispatch_main()
 	io_thread_p->p_path_mgr = 0;
 
 	//set values
-	io_thread_p->p_path_mgr = &path_m;
+	io_thread_p->p_path_mgr = &in_path_mgr;
 	io_thread_p->thread_status = thread_use;
-	io_thread_p->path_k = key;
+	io_thread_p->path_k = in_key;
 	io_thread_p->timer_tv = tv_timer;
 
 	if (io_thread_p->p_path_mgr) 
@@ -348,12 +333,18 @@ int io_dispatch_main()
 	int err = pthread_create(&(io_thread_p->thread_info),0,IoLoopThread,io_thread_p);
 	if (err != 0)
 	{
+		if (io_thread_p)
+		{delete io_thread_p;}
+
+		return -1;
+	}
+	else
+	{
+		return 0;
 	}
 
-	sleep(23);
-	io_thread_p->thread_status = thread_closing;
+	//	sleep(23);
+	//	io_thread_p->thread_status = thread_closing;
 	//pthread_join(io_thread_p->thread_info,0);
-	
-	sleep(3); //dodng:will delete
 
 }

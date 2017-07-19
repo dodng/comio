@@ -61,5 +61,8 @@ void ProcessDownStream_Recv(int fd, short int events, void *arg);
 void ProcessUpStream_Recv(int fd, short int events, void *arg);
 void ProcessTimer(int fd, short int events, void *arg);
 
-int io_dispatch_main();
+
+//interface for other module
+int io_launch_one_thread(Path_Key & in_key, Path_Manager & in_path_mgr);
+
 #endif
