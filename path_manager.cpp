@@ -85,6 +85,7 @@ bool Path_Manager::Get_Path_Listen_Sock(Path_Key in_key, Path_Key_Accept_Sock & 
 		std::map<Path_Key,Path_Key_Accept_Sock,Path_Comp>::iterator it = _accept_dict.find(in_key);
 		if ( it != _accept_dict.end())
 		{
+			it->second.use_num += 1;
 			out_accept_sock = it->second;
 		}
 		else
@@ -94,12 +95,14 @@ bool Path_Manager::Get_Path_Listen_Sock(Path_Key in_key, Path_Key_Accept_Sock & 
 			pthread_mutex_init(p_lock,NULL);
 			out_accept_sock._sd = listen_sd;
 			out_accept_sock._sd_lock = p_lock;
+			out_accept_sock.use_num = 1;
+			_accept_dict.insert(std::make_pair(in_key, out_accept_sock));
 		}
 	}
 
 }
 
-void Path_Manager::Delete_Path_Listen_Sock(Path_Key in_key)
+void Path_Manager::Put_Path_Listen_Sock(Path_Key in_key)
 {
 	{
 		AutoLock_Mutex auto_lock(&_accept_dict_lock);
@@ -108,20 +111,76 @@ void Path_Manager::Delete_Path_Listen_Sock(Path_Key in_key)
 		std::map<Path_Key,Path_Key_Accept_Sock,Path_Comp>::iterator it = _accept_dict.find(in_key);
 		if ( it != _accept_dict.end())
 		{
-			if (it->second._sd > 0 )
-			{
-				close(it->second._sd);
-			}
+			it->second.use_num--;
 
-			if (it->second._sd_lock)
+			if (it->second.use_num <= 0)
 			{
-				pthread_mutex_destroy(it->second._sd_lock);
-				delete it->second._sd_lock;
+				if (it->second._sd > 0 )
+				{
+					close(it->second._sd);
+				}
+
+				if (it->second._sd_lock)
+				{
+					pthread_mutex_destroy(it->second._sd_lock);
+					delete it->second._sd_lock;
+				}
+				_accept_dict.erase(it);
 			}
-			_accept_dict.erase(it);
 		}
 	}
 
 }
 
+void Path_Manager::Add_Path_Ptr(Path_Key in_key, void *p_str)
+{
+	if (0 == p_str) {return;}
+
+	{
+		AutoLock_Mutex auto_lock(&_path_ptr_dict_lock);
+
+		//1.find key
+		std::map<Path_Key,std::vector<void *>,Path_Comp>::iterator it = _path_ptr_dict.find(in_key);
+		if ( it != _path_ptr_dict.end())
+		{
+			it->second.push_back(p_str);
+		}
+		else
+		{
+			std::vector<void *> tmp_vec;
+			tmp_vec.push_back(p_str);
+			_path_ptr_dict.insert(std::make_pair(in_key,tmp_vec));
+		}
+	}
+
+}
+
+void * Path_Manager::Del_Path_Ptr(Path_Key in_key)
+{
+	void *p_str = 0;
+
+	{
+		AutoLock_Mutex auto_lock(&_path_ptr_dict_lock);
+
+		//1.find key
+		std::map<Path_Key,std::vector<void *>,Path_Comp>::iterator it = _path_ptr_dict.find(in_key);
+		if ( it != _path_ptr_dict.end())
+		{
+			if ( it->second.size() <= 0)
+			{
+				_path_ptr_dict.erase(it);
+			}
+			else
+			{
+				p_str = it->second.back();
+				it->second.pop_back();
+				if ( it->second.size() <= 0)
+				{
+					_path_ptr_dict.erase(it);
+				}
+			}
+		}
+	}
+	return p_str;
+}
 

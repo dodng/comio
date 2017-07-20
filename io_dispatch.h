@@ -64,5 +64,6 @@ void ProcessTimer(int fd, short int events, void *arg);
 
 //interface for other module
 int io_launch_one_thread(Path_Key & in_key, Path_Manager & in_path_mgr);
+int io_retrieve_one_thread(Path_Key & in_key, Path_Manager & in_path_mgr);
 
 #endif

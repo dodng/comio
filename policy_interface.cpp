@@ -203,6 +203,12 @@ int policy_entity::get_out_json()
 		int lanuch_ret = io_launch_one_thread(key, g_path_m);
 	}
 
+	//retrieve thread
+	for (int i = 0 ;i < close_thread_num; i++)
+	{
+		int retrieve_ret = io_retrieve_one_thread(key, g_path_m);
+	}
+
 	ret = 0;
 	json_out["ret_code"] = ret;
 	return ret;

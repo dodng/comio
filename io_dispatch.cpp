@@ -77,6 +77,9 @@ void ProcessTimer(int fd, short int events, void *arg)
 	else if (p_it->thread_status == thread_close)
 	{
 		event_base_free(base);
+		//release accept socket
+		p_it->p_path_mgr->Put_Path_Listen_Sock(p_it->path_k);
+
 		if (p_it) 
 		{
 			delete p_it;
@@ -333,13 +336,18 @@ int io_launch_one_thread(Path_Key & in_key, Path_Manager & in_path_mgr)
 	int err = pthread_create(&(io_thread_p->thread_info),0,IoLoopThread,io_thread_p);
 	if (err != 0)
 	{
+		if (io_thread_p->p_path_mgr)
+		{io_thread_p->p_path_mgr->Put_Path_Listen_Sock(io_thread_p->path_k);}
+
 		if (io_thread_p)
 		{delete io_thread_p;}
+
 
 		return -1;
 	}
 	else
 	{
+		in_path_mgr.Add_Path_Ptr(in_key,(void *)io_thread_p);
 		return 0;
 	}
 
@@ -347,4 +355,20 @@ int io_launch_one_thread(Path_Key & in_key, Path_Manager & in_path_mgr)
 	//	io_thread_p->thread_status = thread_closing;
 	//pthread_join(io_thread_p->thread_info,0);
 
+}
+
+int io_retrieve_one_thread(Path_Key & in_key, Path_Manager & in_path_mgr)
+{
+	struct io_dispatch_thread_info * io_thread_p = 0;
+	io_thread_p = (struct io_dispatch_thread_info *)in_path_mgr.Del_Path_Ptr(in_key);
+
+	if (io_thread_p != 0)
+	{
+		io_thread_p->thread_status = thread_closing;
+		return 0;
+	}
+	else
+	{
+		return -1;
+	}
 }
